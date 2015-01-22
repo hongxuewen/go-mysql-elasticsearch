@@ -109,70 +109,99 @@ func (r *River) newRule(schema, table string) error {
 	return nil
 }
 
-func (r *River) prepareRule(c *client.Conn) error {
+func (r *River) parseSource(c *client.Conn) (map[string][]string, error) {
+	wildTables := make(map[string][]string, len(r.c.Sources))
+
 	// first, check sources
 	for _, s := range r.c.Sources {
 		for _, table := range s.Tables {
+			if len(s.Schema) == 0 {
+				return nil, fmt.Errorf("empty schema not allowed for source")
+			}
+
 			if regexp.QuoteMeta(table) != table {
+				if _, ok := wildTables[ruleKey(s.Schema, table)]; ok {
+					return nil, fmt.Errorf("duplicate wildcard table defined for %s.%s", s.Schema, table)
+				}
+
+				tables := []string{}
+
 				sql := fmt.Sprintf(`SELECT table_name FROM information_schema.tables WHERE 
-					table_name RLIKE "%s" AND table_schema = "%s";`, table, s.Schema)
+                    table_name RLIKE "%s" AND table_schema = "%s";`, table, s.Schema)
 
 				res, err := c.Execute(sql)
 				if err != nil {
-					return err
+					return nil, err
 				}
 
 				for i := 0; i < res.Resultset.RowNumber(); i++ {
 					f, _ := res.GetString(i, 0)
 					err := r.newRule(s.Schema, f)
 					if err != nil {
-						return err
+						return nil, err
 					}
+
+					tables = append(tables, f)
 				}
+
+				wildTables[ruleKey(s.Schema, table)] = tables
 			} else {
 				err := r.newRule(s.Schema, table)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
 	}
 
 	if len(r.rules) == 0 {
-		return fmt.Errorf("no source data defined")
+		return nil, fmt.Errorf("no source data defined")
+	}
+
+	return wildTables, nil
+}
+
+func (r *River) prepareRule(c *client.Conn) error {
+	wildtables, err := r.parseSource(c)
+	if err != nil {
+		return err
 	}
 
 	if r.c.Rules != nil {
-		r.c.Rules.prepare()
-
 		// then, set custom mapping rule
 		for _, rule := range r.c.Rules {
+			if len(rule.Schema) == 0 {
+				return fmt.Errorf("empty schema not allowed for rule")
+			}
+
 			if regexp.QuoteMeta(rule.Table) != rule.Table {
-				tableExp := regexp.MustCompile(rule.Table)
-
-				for k, rr := range r.rules {
-					if tableExp.MatchString(rr.Table) && rule.Schema == rr.Schema {
-						if _, ok := r.rules[k]; !ok {
-							return fmt.Errorf("rule %s, %s not defined in source", rr.Schema, rr.Table)
-						}
-
-						// replace regexp table name to specific table name
-						r.rules[k].Table = rr.Table
-						r.rules[k].Index = rule.Index
-						r.rules[k].Type = rule.Type
-						r.rules[k].FieldMapping = rule.FieldMapping
-					}
+				//wildcard table
+				tables, ok := wildtables[ruleKey(rule.Schema, rule.Table)]
+				if !ok {
+					return fmt.Errorf("wildcard table for %s.%s is not defined in source", rule.Schema, rule.Table)
 				}
 
+				if len(rule.Index) == 0 {
+					return fmt.Errorf("wildcard table rule %s.%s must have a index, can not empty", rule.Schema, rule.Table)
+				}
+
+				rule.prepare()
+
+				for _, table := range tables {
+					rr := r.rules[ruleKey(rule.Schema, table)]
+					rr.Index = rule.Index
+					rr.Type = rule.Type
+					rr.FieldMapping = rule.FieldMapping
+				}
 			} else {
 				key := ruleKey(rule.Schema, rule.Table)
 				if _, ok := r.rules[key]; !ok {
 					return fmt.Errorf("rule %s, %s not defined in source", rule.Schema, rule.Table)
 				}
+				rule.prepare()
 				r.rules[key] = rule
 			}
 		}
-
 	}
 
 	for _, rule := range r.rules {

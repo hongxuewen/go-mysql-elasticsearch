@@ -25,7 +25,7 @@ type Config struct {
 
 	Sources []SourceConfig `toml:"source"`
 
-	Rules Rules `toml:"rule"`
+	Rules []*Rule `toml:"rule"`
 }
 
 func NewConfigWithFile(name string) (*Config, error) {

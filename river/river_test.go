@@ -44,7 +44,7 @@ func (s *riverTestSuite) SetUpSuite(c *C) {
 	s.testExecute(c, fmt.Sprintf(schema, "test_river"))
 
 	for i := 0; i < 10; i++ {
-		table := fmt.Sprintf("test_river1_%04d", i)
+		table := fmt.Sprintf("test_river_%04d", i)
 		s.testExecute(c, fmt.Sprintf("DROP TABLE IF EXISTS %s", table))
 		s.testExecute(c, fmt.Sprintf(schema, table))
 	}
@@ -63,23 +63,20 @@ func (s *riverTestSuite) SetUpSuite(c *C) {
 
 	os.RemoveAll(cfg.DataDir)
 
-	cfg.Sources = []SourceConfig{SourceConfig{Schema: "test", Tables: []string{"test_river", "test_river1_[0-9]{4}"}}}
+	cfg.Sources = []SourceConfig{SourceConfig{Schema: "test", Tables: []string{"test_river", "test_river_[0-9]{4}"}}}
 
-	cfg.Rules = Rules{
-		&Rule{
-			Schema:       "test",
-			Table:        "test_river1_[0-9]{4}",
-			Index:        "river",
-			Type:         "river",
-			FieldMapping: map[string]string{"title": "es_title"}},
-
-		&Rule{
-			Schema:       "test",
+	cfg.Rules = []*Rule{
+		&Rule{Schema: "test",
 			Table:        "test_river",
 			Index:        "river",
 			Type:         "river",
 			FieldMapping: map[string]string{"title": "es_title"}},
-	}
+
+		&Rule{Schema: "test",
+			Table:        "test_river_[0-9]{4}",
+			Index:        "river",
+			Type:         "river",
+			FieldMapping: map[string]string{"title": "es_title"}}}
 
 	s.r, err = NewRiver(cfg)
 	c.Assert(err, IsNil)
@@ -110,22 +107,32 @@ data_dir = "./var"
 
 [[source]]
 schema = "test"
-tables = ["es_test"]
+
+tables = ["test_river", "test_river_[0-9]{4}"]
 
 [[rule]]
 schema = "test"
-table = "es_test"
-index = "es_test"
-type = "es_test"
-
+table = "test_river"
+index = "river"
+type = "river"
     [rule.field]
-    name = "es_name"
+    title = "es_title"
+
+[[rule]]
+schema = "test"
+table = "test_river_[0-9]{4}"
+index = "river"
+type = "river"
+    [rule.field]
+    title = "es_title"
+
 `
 
 	cfg, err := NewConfig(str)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Sources, HasLen, 1)
-	c.Assert(cfg.Rules, HasLen, 1)
+	c.Assert(cfg.Sources[0].Tables, HasLen, 2)
+	c.Assert(cfg.Rules, HasLen, 2)
 }
 
 func (s *riverTestSuite) testExecute(c *C, query string, args ...interface{}) {
@@ -140,8 +147,8 @@ func (s *riverTestSuite) testPrepareData(c *C) {
 	s.testExecute(c, "INSERT INTO test_river (id, title, content) VALUES (?, ?, ?)", 4, "fouth", "hello go-mysql-elasticserach 4")
 
 	for i := 0; i < 10; i++ {
-		table := fmt.Sprintf("test_river1_%04d", i)
-		s.testExecute(c, fmt.Sprintf("INSERT INTO %s (id, title, content) VALUES (?, ?, ?)", table), 5+i, table, "hello")
+		table := fmt.Sprintf("test_river_%04d", i)
+		s.testExecute(c, fmt.Sprintf("INSERT INTO %s (id, title, content) VALUES (?, ?, ?)", table), 5+i, "abc", "hello")
 	}
 }
 
@@ -181,11 +188,17 @@ func (s *riverTestSuite) TestRiver(c *C) {
 	for i := 0; i < 10; i++ {
 		r = s.testElasticGet(c, fmt.Sprintf("%d", 5+i))
 		c.Assert(r.Found, Equals, true)
+		c.Assert(r.Source["es_title"], Equals, "abc")
 	}
 
 	s.testExecute(c, "UPDATE test_river SET title = ? WHERE id = ?", "second 2", 2)
 	s.testExecute(c, "DELETE FROM test_river WHERE id = ?", 1)
 	s.testExecute(c, "UPDATE test_river SET title = ?, id = ? WHERE id = ?", "second 30", 30, 3)
+
+	for i := 0; i < 10; i++ {
+		table := fmt.Sprintf("test_river_%04d", i)
+		s.testExecute(c, fmt.Sprintf("UPDATE %s SET title = ? WHERE id = ?", table), "hello", 5+i)
+	}
 
 	s.testWaitSyncDone(c)
 
@@ -202,4 +215,10 @@ func (s *riverTestSuite) TestRiver(c *C) {
 	r = s.testElasticGet(c, "30")
 	c.Assert(r.Found, Equals, true)
 	c.Assert(r.Source["es_title"], Equals, "second 30")
+
+	for i := 0; i < 10; i++ {
+		r = s.testElasticGet(c, fmt.Sprintf("%d", 5+i))
+		c.Assert(r.Found, Equals, true)
+		c.Assert(r.Source["es_title"], Equals, "hello")
+	}
 }
