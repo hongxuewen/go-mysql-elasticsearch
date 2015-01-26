@@ -1,6 +1,14 @@
-go-mysql-elasticsearch is a service to sync your MySQL data into Elasticsearch automatically. 
+go-mysql-elasticsearch is a service syncing your MySQL data into Elasticsearch automatically. 
 
 It uses `mysqldump` to fetch the origin data at first, then syncs data incrementally with binlog.
+
+## Install 
+
++ Install Go and set your [GOPATH](https://golang.org/doc/code.html#GOPATH)
++ Install godep `go get github.com/tools/godep`
++ `go get github.com/siddontang/go-mysql-elasticsearch`, it will print some messages in console, skip it. :-)
++ cd `$GOPATH/src/github.com/siddontang/go-mysql-elasticsearch`
++ `make`
 
 ## How to use?
 
@@ -9,12 +17,12 @@ It uses `mysqldump` to fetch the origin data at first, then syncs data increment
 + Config base, see the example config [river.toml](./etc/river.toml).
 + Set MySQL source in config file, see [Source](#source) below.
 + Customize MySQL and Elasticsearch mapping rule in config file, see [Rule](#rule) below.
-+ Start `go-mysql-elasticsearch` and enjoy it.
++ Start `./bin/go-mysql-elasticsearch -config=./etc/river.toml` and enjoy it.
 
 ## Notice
 
 + binlog format must be **row**.
-+ binlog row image may be **full** for MySQL. (MariaDB only supports full row image).
++ binlog row image may be **full** for MySQL, you may lost some field data if you update PK data in MySQL with minimal or noblob binlog row image. MariaDB only supports full row image. 
 + Can not alter table format at runtime.
 + MySQL table which will be synced must have a PK(primary key), multi columns PK is not allowed now. The PK data will be used as "id" in Elasticsearch.  
 + You should create the associated mappings in Elasticsearch first, I don't think using the default mapping is a wise decision, you must know how to search accurately.
@@ -61,14 +69,6 @@ type = "t"
 
 In the example above, we will use a new index and type both named "t" instead of default "t1", and use "my_title" instead of field name "title".
 
-## Why not other rivers?
-
-Although there are some other MySQL rivers for Elasticsearch, like [elasticsearch-river-jdbc](https://github.com/jprante/elasticsearch-river-jdbc), [elasticsearch-river-mysql](https://github.com/scharron/elasticsearch-river-mysql), I still want to build a new one with Go, why?
-
-+ Customization, I want to decide which table to be synced, the associated index and type name, or even the field name in Elasticsearch.
-+ Incremental replication with binlog, and can resume from the last sync position when the service starts. 
-+ A common sync framework not only for Elasticsearch but also for others, like memcached, redis, etc...
-
 ## Wildcard table
 
 go-mysql-elasticsearch only allows you determind which table to be synced, but sometimes, if you split a big table into multi sub tables, like 1024, table_0000, table_0001, ... table_1023, it is very hard to write rules for every table. 
@@ -91,10 +91,20 @@ type = "river"
 
 At the above example, if you have 1024 sub tables, all tables will be synced into Elasticsearch with index "river" and type "river". 
 
+## Why not other rivers?
+
+Although there are some other MySQL rivers for Elasticsearch, like [elasticsearch-river-jdbc](https://github.com/jprante/elasticsearch-river-jdbc), [elasticsearch-river-mysql](https://github.com/scharron/elasticsearch-river-mysql), I still want to build a new one with Go, why?
+
++ Customization, I want to decide which table to be synced, the associated index and type name, or even the field name in Elasticsearch.
++ Incremental update with binlog, and can resume from the last sync position when the service starts again. 
++ A common sync framework not only for Elasticsearch but also for others, like memcached, redis, etc...
++ Wildcard tables support, we have many sub tables like table_0000 - table_1023, but want use a unique Elasticsearch index and type. 
+
 ## Todo
 
 + Filtering table field support, only fields in filter config will be synced.
 + Statistic.
++ Docker
 
 ## Feedback
 
